@@ -1,153 +1,115 @@
 import java.io.*;
 import java.util.*;
 
+// Main class for vector quantization compression
 public class VectorQuantization {
     public static void main(String[] args) {
         try {
-            System.out.println("Starting VectorQuantization...");
-
-            // Define paths
+            // Set up directories
             String trainPath = "data/input/train/";
             String testPath = "data/input/test/";
             String codebookPath = "data/output/codebooks/";
             String compressedPath = "data/output/compressed/";
             String decompressedPath = "data/output/decompressed/";
 
-            // Create output directories
-            System.out.println("Creating output directories...");
             new File(codebookPath).mkdirs();
             new File(compressedPath).mkdirs();
             new File(decompressedPath).mkdirs();
 
-            // Load training images
-            System.out.println("Loading training images...");
-            List<String> trainImages = new ArrayList<>();
-            String[] domains = {"nature", "faces", "animals"};
-            for (String domain : domains) {
-                String domainCapitalized = domain.substring(0, 1).toUpperCase() + domain.substring(1);
-                for (int i = 1; i <= 10; i++) {
-                    String imagePath = trainPath + domain + "/" + domainCapitalized + " " + i + ".jpg";
-                    trainImages.add(imagePath);
-                    System.out.println("Added training image: " + imagePath);
+            // Initialize codebooks
+            String[] codebookFiles = {codebookPath + "red_codebook.txt", codebookPath + "green_codebook.txt", codebookPath + "blue_codebook.txt"};
+            Codebook redCodebook = new Codebook(2, 256, "Red", codebookFiles[0]);
+            Codebook greenCodebook = new Codebook(2, 256, "Green", codebookFiles[1]);
+            Codebook blueCodebook = new Codebook(2, 256, "Blue", codebookFiles[2]);
+
+            // Generate codebooks if missing or invalid
+            boolean allCodebooksExist = Arrays.stream(codebookFiles).allMatch(f -> new File(f).exists());
+            if (!allCodebooksExist || !redCodebook.isValid() || !greenCodebook.isValid() || !blueCodebook.isValid()) {
+                // Collect training image paths
+                List<String> trainingImagePaths = new ArrayList<>();
+                String[] domains = {"nature", "faces", "animals"};
+                String[] fileNames = {"Nature", "Faces", "Animals"};
+                for (int index = 0; index < domains.length; index++) {
+                    String domain = domains[index];
+                    String fileName = fileNames[index];
+                    for (int i = 1; i <= 10; i++) {
+                        trainingImagePaths.add(trainPath + domain + "/" + fileName + " " + i + ".jpg");
+                    }
                 }
-            }
 
-            // Generate codebooks for R, G, B
-            System.out.println("Generating codebooks...");
-            ImageProcessor processor = new ImageProcessor();
-            Codebook redCodebook = new Codebook(2, 256);
-            Codebook greenCodebook = new Codebook(2, 256);
-            Codebook blueCodebook = new Codebook(2, 256);
-
-            List<double[]> redBlocks = new ArrayList<>();
-            List<double[]> greenBlocks = new ArrayList<>();
-            List<double[]> blueBlocks = new ArrayList<>();
-
-            for (String imagePath : trainImages) {
-                System.out.println("Processing training image: " + imagePath);
-                try {
-                    int[][][] rgb = processor.loadImage(imagePath);
-                    redBlocks.addAll(processor.getBlocks(rgb[0]));
-                    greenBlocks.addAll(processor.getBlocks(rgb[1]));
-                    blueBlocks.addAll(processor.getBlocks(rgb[2]));
-                } catch (IOException e) {
-                    System.out.println("Error reading training image: " + imagePath);
-                    throw e;
+                // Extract 2x2 blocks from training images
+                ImageProcessor imageProcessor = new ImageProcessor();
+                List<double[]> redBlocks = new ArrayList<>();
+                List<double[]> greenBlocks = new ArrayList<>();
+                List<double[]> blueBlocks = new ArrayList<>();
+                for (String imagePath : trainingImagePaths) {
+                    int[][][] rgbChannels = imageProcessor.loadImage(imagePath);
+                    redBlocks.addAll(imageProcessor.getBlocks(rgbChannels[0]));
+                    greenBlocks.addAll(imageProcessor.getBlocks(rgbChannels[1]));
+                    blueBlocks.addAll(imageProcessor.getBlocks(rgbChannels[2]));
                 }
+
+                // Generate and save codebooks
+                redCodebook.generateCodebook(redBlocks);
+                greenCodebook.generateCodebook(greenBlocks);
+                blueCodebook.generateCodebook(blueBlocks);
+                redCodebook.saveCodebook(codebookFiles[0]);
+                greenCodebook.saveCodebook(codebookFiles[1]);
+                blueCodebook.saveCodebook(codebookFiles[2]);
             }
-
-            System.out.println("Generating Red codebook...");
-            redCodebook.generateCodebook(redBlocks);
-            System.out.println("Generating Green codebook...");
-            greenCodebook.generateCodebook(greenBlocks);
-            System.out.println("Generating Blue codebook...");
-            blueCodebook.generateCodebook(blueBlocks);
-
-            // Save codebooks
-            System.out.println("Saving codebooks...");
-            redCodebook.saveCodebook(codebookPath + "red_codebook.txt");
-            greenCodebook.saveCodebook(codebookPath + "green_codebook.txt");
-            blueCodebook.saveCodebook(codebookPath + "blue_codebook.txt");
 
             // Process test images
-            System.out.println("Processing test images...");
+            ImageProcessor processor = new ImageProcessor();
             VQCompressor compressor = new VQCompressor();
             QualityMetrics metrics = new QualityMetrics();
             Map<String, List<Double>> mseByDomain = new HashMap<>();
-            Map<String, List<Double>> psnrByDomain = new HashMap<>();
             Map<String, List<Double>> crByDomain = new HashMap<>();
-            for (String domain : domains) {
+            String[] domains = {"nature", "faces", "animals"};
+            String[] fileNames = {"Nature", "Faces", "Animals"};
+            for (int index = 0; index < domains.length; index++) {
+                String domain = domains[index];
+                String fileName = fileNames[index];
                 mseByDomain.put(domain, new ArrayList<>());
-                psnrByDomain.put(domain, new ArrayList<>());
                 crByDomain.put(domain, new ArrayList<>());
-            }
-
-            for (String domain : domains) {
-                String domainCapitalized = domain.substring(0, 1).toUpperCase() + domain.substring(1);
                 for (int i = 1; i <= 5; i++) {
-                    String imagePath = testPath + domain + "/" + domainCapitalized + " " + i + ".jpg";
-                    String compressedFile = compressedPath + domain + i + ".txt";
-                    String decompressedFile = decompressedPath + domain + i + "_decompressed.png";
-                    System.out.println("Processing test image: " + imagePath);
+                    String path = testPath + domain + "/" + fileName + " " + i + ".jpg";
+                    String compFile = compressedPath + domain + i + ".txt";
+                    String decompFile = decompressedPath + domain + i + "_decompressed.png";
+                    int[][][] rgb = processor.loadImage(path);
+                    int[][] red = rgb[0], green = rgb[1], blue = rgb[2];
 
-                    // Load test image
-                    try {
-                        int[][][] rgb = processor.loadImage(imagePath);
-                        int[][] red = rgb[0], green = rgb[1], blue = rgb[2];
+                    List<double[]> redBlocks = processor.getBlocks(red);
+                    List<double[]> greenBlocks = processor.getBlocks(green);
+                    List<double[]> blueBlocks = processor.getBlocks(blue);
+                    int[][] redLabels = compressor.compressImage(redBlocks, redCodebook);
+                    int[][] greenLabels = compressor.compressImage(greenBlocks, greenCodebook);
+                    int[][] blueLabels = compressor.compressImage(blueBlocks, blueCodebook);
+                    compressor.saveCompressedIndices(redLabels, greenLabels, blueLabels, compFile);
 
-                        // Compress
-                        List<double[]> redTestBlocks = processor.getBlocks(red);
-                        List<double[]> greenTestBlocks = processor.getBlocks(green);
-                        List<double[]> blueTestBlocks = processor.getBlocks(blue);
+                    int[][] reconRed = compressor.reconstructComponent(redLabels, redCodebook, red.length, red[0].length);
+                    int[][] reconGreen = compressor.reconstructComponent(greenLabels, greenCodebook, green.length, green[0].length);
+                    int[][] reconBlue = compressor.reconstructComponent(blueLabels, blueCodebook, blue.length, blue[0].length);
+                    processor.saveImage(reconRed, reconGreen, reconBlue, decompFile);
 
-                        int[][] redLabels = compressor.compressImage(redTestBlocks, redCodebook);
-                        int[][] greenLabels = compressor.compressImage(greenTestBlocks, greenCodebook);
-                        int[][] blueLabels = compressor.compressImage(blueTestBlocks, blueCodebook);
-
-                        // Save compressed indices
-                        compressor.saveCompressedIndices(redLabels, greenLabels, blueLabels, compressedFile);
-
-                        // Decompress
-                        int[][] reconRed = compressor.reconstructComponent(redLabels, redCodebook, 1000, 1000);
-                        int[][] reconGreen = compressor.reconstructComponent(greenLabels, greenCodebook, 1000, 1000);
-                        int[][] reconBlue = compressor.reconstructComponent(blueLabels, blueCodebook, 1000, 1000);
-
-                        // Reconstruct image
-                        processor.saveImage(reconRed, reconGreen, reconBlue, decompressedFile);
-
-                        // Calculate metrics
-                        double mse = metrics.calculateMSE(rgb, new int[][][]{reconRed, reconGreen, reconBlue});
-                        double psnr = metrics.calculatePSNR(mse);
-                        double cr = metrics.calculateCompressionRatio(1000, 1000, redLabels.length * redLabels[0].length, 256);
-
-                        mseByDomain.get(domain).add(mse);
-                        psnrByDomain.get(domain).add(psnr);
-                        crByDomain.get(domain).add(cr);
-
-                        System.out.printf("Test Image: %s %d.jpg, MSE: %.2f, PSNR: %.2f dB, Compression Ratio: %.2f\n",
-                                domainCapitalized, i, mse, psnr, cr);
-                    } catch (IOException e) {
-                        System.out.println("Error processing test image: " + imagePath);
-                        throw e;
-                    }
+                    double mse = metrics.calculateMSE(rgb, new int[][][]{reconRed, reconGreen, reconBlue});
+                    double cr = metrics.calculateCompressionRatio(red.length, red[0].length, redLabels.length * redLabels[0].length, 256);
+                    mseByDomain.get(domain).add(mse);
+                    crByDomain.get(domain).add(cr);
+                    System.out.printf("Test Image: %s %d.jpg, MSE: %.2f, Compression Ratio: %.2f\n",
+                            fileName, i, mse, cr);
                 }
             }
 
             // Print average metrics per domain
-            System.out.println("Printing average metrics...");
             for (String domain : domains) {
                 double avgMSE = mseByDomain.get(domain).stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                double avgPSNR = psnrByDomain.get(domain).stream().mapToDouble(Double::doubleValue).average().orElse(0);
                 double avgCR = crByDomain.get(domain).stream().mapToDouble(Double::doubleValue).average().orElse(0);
-                System.out.printf("Domain: %s, Avg MSE: %.2f, Avg PSNR: %.2f dB, Avg Compression Ratio: %.2f\n",
-                        domain, avgMSE, avgPSNR, avgCR);
+                System.out.printf("Domain: %s, Avg MSE: %.2f, Avg Compression Ratio: %.2f\n",
+                        domain, avgMSE, avgCR);
             }
 
-            System.out.println("Program completed successfully.");
-
-        } catch (Exception e) {
-            System.out.println("Error: " + e.getMessage());
-            e.printStackTrace();
+        } catch (IOException e) {
+            System.err.println("IO Error: " + e.getMessage());
         }
     }
 }

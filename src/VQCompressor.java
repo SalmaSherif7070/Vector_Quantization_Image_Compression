@@ -1,33 +1,37 @@
 import java.io.*;
 import java.util.*;
 
+// Manages image compression and decompression
 public class VQCompressor {
+    // Compress blocks to codebook indices
     public int[][] compressImage(List<double[]> blocks, Codebook codebook) {
-        int blockSize = 2;
-        int width = 1000 / blockSize;
-        int height = 1000 / blockSize;
-        int[][] labels = new int[height][width];
-        int blockIndex = 0;
-
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                labels[y][x] = codebook.findNearestVector(blocks.get(blockIndex++));
-            }
-        }
+        int numBlocks = blocks.size();
+        int w = (int) Math.ceil(Math.sqrt(numBlocks));
+        int h = (numBlocks + w - 1) / w;
+        int[][] labels = new int[h][w];
+        for (int i = 0; i < numBlocks; i++) labels[i / w][i % w] = codebook.findNearestVector(blocks.get(i));
         return labels;
     }
 
-    public int[][] reconstructComponent(int[][] labels, Codebook codebook, int width, int height) {
-        int blockSize = 2;
+    // Reconstructs an image component from compressed indices
+    public int[][] reconstructComponent(int[][] labels, Codebook codebook, int height, int width) {
         int[][] component = new int[height][width];
+        List<double[]> vectors = codebook.getCodebook();
+        int blockSize = 2;
 
-        for (int y = 0; y < labels.length; y++) {
-            for (int x = 0; x < labels[0].length; x++) {
-                double[] vector = codebook.getCodebook().get(labels[y][x]);
-                int index = 0;
-                for (int i = 0; i < blockSize; i++) {
-                    for (int j = 0; j < blockSize; j++) {
-                        component[y * blockSize + i][x * blockSize + j] = (int) vector[index++];
+        for (int blockY = 0; blockY < labels.length; blockY++) {
+            for (int blockX = 0; blockX < labels[0].length; blockX++) {
+                int label = labels[blockY][blockX];
+                if (label >= 0 && label < vectors.size()) {
+                    double[] vector = vectors.get(label);
+                    for (int i = 0, index = 0; i < blockSize; i++) {
+                        for (int j = 0; j < blockSize; j++, index++) {
+                            int pixelY = blockY * blockSize + i;
+                            int pixelX = blockX * blockSize + j;
+                            if (pixelY < height && pixelX < width) {
+                                component[pixelY][pixelX] = (int) vector[index];
+                            }
+                        }
                     }
                 }
             }
@@ -35,28 +39,21 @@ public class VQCompressor {
         return component;
     }
 
+    // Save compressed indices as 8-bit binary strings to file
     public void saveCompressedIndices(int[][] redLabels, int[][] greenLabels, int[][] blueLabels, String path) throws IOException {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(path))) {
-            writer.write("Red:\n");
-            for (int[] row : redLabels) {
-                for (int i = 0; i < row.length; i++) {
-                    writer.write(row[i] + (i < row.length - 1 ? "," : ""));
+            for (String channel : new String[]{"Red", "Green", "Blue"}) {
+                writer.write(channel + ":\n");
+                int[][] labels = channel.equals("Red") ? redLabels : channel.equals("Green") ? greenLabels : blueLabels;
+                for (int[] row : labels) {
+                    String[] binaryIndices = new String[row.length];
+                    for (int i = 0; i < row.length; i++) {
+                        // Convert index to 8-bit binary string
+                        String binary = Integer.toBinaryString(row[i]);
+                        binaryIndices[i] = String.format("%8s", binary).replace(' ', '0');
+                    }
+                    writer.write(String.join(",", binaryIndices) + "\n");
                 }
-                writer.newLine();
-            }
-            writer.write("Green:\n");
-            for (int[] row : greenLabels) {
-                for (int i = 0; i < row.length; i++) {
-                    writer.write(row[i] + (i < row.length - 1 ? "," : ""));
-                }
-                writer.newLine();
-            }
-            writer.write("Blue:\n");
-            for (int[] row : blueLabels) {
-                for (int i = 0; i < row.length; i++) {
-                    writer.write(row[i] + (i < row.length - 1 ? "," : ""));
-                }
-                writer.newLine();
             }
         }
     }

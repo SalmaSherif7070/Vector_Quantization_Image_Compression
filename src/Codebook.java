@@ -1,92 +1,100 @@
 import java.io.*;
 import java.util.*;
 
+// Manages codebook for vector quantization
 public class Codebook {
-    private int blockSize;
-    private int codebookSize;
-    private List<double[]> codebook;
+    private final int blockSize, codebookSize;
+    private final List<double[]> codebook;
+    private final String channel;
 
-    public Codebook(int blockSize, int codebookSize) {
+    // Initialize codebook parameters
+    public Codebook(int blockSize, int codebookSize, String channel) {
         this.blockSize = blockSize;
         this.codebookSize = codebookSize;
         this.codebook = new ArrayList<>();
+        this.channel = channel;
     }
 
+    // Load codebook from file if it exists
+    public Codebook(int blockSize, int codebookSize, String channel, String file) throws IOException {
+        this(blockSize, codebookSize, channel);
+        if (new File(file).exists()) loadCodebook(file);
+    }
+
+    // Read codebook vectors from file
+    private void loadCodebook(String path) throws IOException {
+        codebook.clear();
+        try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] values = line.split(",");
+                if (values.length == blockSize * blockSize) {
+                    double[] vector = new double[values.length];
+                    for (int i = 0; i < values.length; i++) vector[i] = Double.parseDouble(values[i]);
+                    codebook.add(vector);
+                }
+            }
+        }
+    }
+
+    // Generate codebook
     public void generateCodebook(List<double[]> blocks) {
-        System.out.println("Starting generateCodebook with " + blocks.size() + " blocks...");
-        if (blocks.isEmpty()) {
-            System.out.println("Error: No blocks provided to generate codebook.");
-            return;
+        if (blocks.isEmpty()) return;
+        codebook.add(averageBlock(blocks));
+        while (codebook.size() < codebookSize) {
+            List<double[]> newCodebook = new ArrayList<>();
+            for (double[] vector : codebook) {
+                double[] v1 = new double[vector.length], v2 = new double[vector.length];
+                for (int i = 0; i < vector.length; i++) {
+                    v1[i] = vector[i] * 1.01;
+                    v2[i] = vector[i] * 0.99;
+                }
+                newCodebook.add(v1);
+                newCodebook.add(v2);
+            }
+            codebook.clear();
+            codebook.addAll(newCodebook);
+            refineCodebook(blocks);
         }
+        if (codebook.size() > codebookSize) codebook.subList(codebookSize, codebook.size()).clear();
+    }
 
-        // Initialize codebook with random vectors
-        System.out.println("Initializing codebook with " + codebookSize + " vectors...");
-        Random rand = new Random();
-        for (int i = 0; i < codebookSize; i++) {
-            double[] vector = new double[blockSize * blockSize];
-            for (int j = 0; j < vector.length; j++) {
-                vector[j] = rand.nextDouble() * 255;
-            }
-            codebook.add(vector);
-        }
+    // Calculate average block centroid
+    private double[] averageBlock(List<double[]> blocks) {
+        double[] avg = new double[blockSize * blockSize];
+        for (double[] block : blocks) for (int i = 0; i < block.length; i++) avg[i] += block[i];
+        for (int i = 0; i < avg.length; i++) avg[i] /= blocks.size();
+        return avg;
+    }
 
-        // K-means clustering
-        System.out.println("Starting k-means clustering...");
-        int maxIterations = 100;
-        for (int iter = 0; iter < maxIterations; iter++) {
-            System.out.println("Iteration " + (iter + 1) + "...");
-            List<List<double[]>> clusters = new ArrayList<>();
-            for (int i = 0; i < codebookSize; i++) {
-                clusters.add(new ArrayList<>());
-            }
-
-            // Assign blocks to nearest codebook vector
-            for (double[] block : blocks) {
-                int nearest = findNearestVector(block);
-                clusters.get(nearest).add(block);
-            }
-
-            // Update codebook vectors
-            boolean changed = false;
-            for (int i = 0; i < codebookSize; i++) {
-                List<double[]> cluster = clusters.get(i);
-                if (!cluster.isEmpty()) {
-                    double[] newVector = new double[blockSize * blockSize];
-                    for (double[] block : cluster) {
-                        for (int j = 0; j < newVector.length; j++) {
-                            newVector[j] += block[j];
-                        }
-                    }
-                    for (int j = 0; j < newVector.length; j++) {
-                        newVector[j] /= cluster.size();
-                    }
-                    
-                    if (!Arrays.equals(codebook.get(i), newVector)) {
+    // Refine codebook with k-means until stable
+    private void refineCodebook(List<double[]> blocks) {
+        int iter = 0;
+        boolean changed;
+        do {
+            System.out.println(channel + ": " + (++iter));
+            changed = false;
+            List<List<double[]>> clusters = new ArrayList<>(Collections.nCopies(codebook.size(), null));
+            for (int i = 0; i < codebook.size(); i++) clusters.set(i, new ArrayList<>());
+            for (double[] block : blocks) clusters.get(findNearestVector(block)).add(block);
+            for (int i = 0; i < codebook.size(); i++) {
+                if (!clusters.get(i).isEmpty()) {
+                    double[] newVector = averageBlock(clusters.get(i));
+                    if (euclideanDistance(newVector, codebook.get(i)) > 0.0001) {
                         codebook.set(i, newVector);
                         changed = true;
                     }
                 }
             }
-
-            // Does not converge most of the time, so I have put max_iterations to 100
-            if (!changed) {
-                System.out.println("Converged after " + (iter + 1) + " iterations.");
-                break;
-            }
-        }
-        System.out.println("Codebook generation completed.");
+        } while (changed);
     }
 
+    // Find index of nearest codebook vector
     public int findNearestVector(double[] block) {
         int nearest = 0;
         double minDist = Double.MAX_VALUE;
         for (int i = 0; i < codebook.size(); i++) {
-            double dist = 0;
-            double[] vector = codebook.get(i);
-            for (int j = 0; j < block.length; j++) {
-                double diff = block[j] - vector[j];
-                dist += diff * diff;
-            }
+            double dist = euclideanDistance(block, codebook.get(i));
             if (dist < minDist) {
                 minDist = dist;
                 nearest = i;
@@ -95,18 +103,28 @@ public class Codebook {
         return nearest;
     }
 
+    // Compute Euclidean distance between vectors
+    private double euclideanDistance(double[] v1, double[] v2) {
+        double sum = 0;
+        for (int i = 0; i < v1.length; i++) sum += (v1[i] - v2[i]) * (v1[i] - v2[i]);
+        return Math.sqrt(sum);
+    }
+
+    // Get codebook vectors
     public List<double[]> getCodebook() {
         return codebook;
     }
 
+    // Verify codebook size
+    public boolean isValid() {
+        return codebook.size() == codebookSize;
+    }
+
+    // Save codebook to file
     public void saveCodebook(String path) throws IOException {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(path))) {
-            for (double[] vector : codebook) {
-                for (int i = 0; i < vector.length; i++) {
-                    writer.write(vector[i] + (i < vector.length - 1 ? "," : ""));
-                }
-                writer.newLine();
-            }
+            for (double[] vector : codebook)
+                writer.write(String.join(",", Arrays.stream(vector).mapToObj(String::valueOf).toArray(String[]::new)) + "\n");
         }
     }
 }

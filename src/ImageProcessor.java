@@ -1,44 +1,38 @@
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
-import java.io.File;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import java.io.*;
+import java.util.*;
 
+// Handles image loading, block extraction, and saving
 public class ImageProcessor {
+    // Load RGB image from file
     public int[][][] loadImage(String path) throws IOException {
-        BufferedImage image = ImageIO.read(new File(path));
-        int width = image.getWidth();
-        int height = image.getHeight();
-        int[][] red = new int[height][width];
-        int[][] green = new int[height][width];
-        int[][] blue = new int[height][width];
-
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int rgb = image.getRGB(x, y);
-                red[y][x] = (rgb >> 16) & 0xFF;
-                green[y][x] = (rgb >> 8) & 0xFF;
-                blue[y][x] = rgb & 0xFF;
-            }
+        BufferedImage img = ImageIO.read(new File(path));
+        int w = img.getWidth();
+        int h = img.getHeight();
+        int[][] red = new int[h][w];
+        int[][] green = new int[h][w];
+        int[][] blue = new int[h][w];
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+            int rgb = img.getRGB(x, y);
+            red[y][x] = (rgb >> 16) & 0xFF;
+            green[y][x] = (rgb >> 8) & 0xFF;
+            blue[y][x] = rgb & 0xFF;
         }
         return new int[][][]{red, green, blue};
     }
 
+    // Extract 2x2 blocks from image component
     public List<double[]> getBlocks(int[][] component) {
         List<double[]> blocks = new ArrayList<>();
-        int height = component.length;
-        int width = component[0].length;
-        int blockSize = 2;
-
-        for (int y = 0; y < height - blockSize + 1; y += blockSize) {
-            for (int x = 0; x < width - blockSize + 1; x += blockSize) {
-                double[] block = new double[blockSize * blockSize];
-                int index = 0;
-                for (int i = 0; i < blockSize; i++) {
-                    for (int j = 0; j < blockSize; j++) {
-                        block[index++] = component[y + i][x + j];
-                    }
+        int h = component.length;
+        int w = component[0].length;
+        int BlockSize = 2;
+        for (int y = 0; y <= h - BlockSize; y += BlockSize){
+            for (int x = 0; x <= w - BlockSize; x += BlockSize) {
+                double[] block = new double[BlockSize * BlockSize];
+                for (int i = 0, idx = 0; i < BlockSize; i++){
+                    for (int j = 0; j < BlockSize; j++) block[idx++] = component[y + i][x + j];
                 }
                 blocks.add(block);
             }
@@ -46,20 +40,16 @@ public class ImageProcessor {
         return blocks;
     }
 
+    // Save RGB image to file
     public void saveImage(int[][] red, int[][] green, int[][] blue, String path) throws IOException {
-        int height = red.length;
-        int width = red[0].length;
-        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int r = Math.min(255, Math.max(0, red[y][x]));
-                int g = Math.min(255, Math.max(0, green[y][x]));
-                int b = Math.min(255, Math.max(0, blue[y][x]));
-                int rgb = (r << 16) | (g << 8) | b;
-                image.setRGB(x, y, rgb);
-            }
+        int h = red.length, w = red[0].length;
+        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+            int r = Math.min(255, Math.max(0, red[y][x]));
+            int g = Math.min(255, Math.max(0, green[y][x]));
+            int b = Math.min(255, Math.max(0, blue[y][x]));
+            img.setRGB(x, y, (r << 16) | (g << 8) | b);
         }
-        ImageIO.write(image, "png", new File(path));
+        ImageIO.write(img, "png", new File(path));
     }
 }
